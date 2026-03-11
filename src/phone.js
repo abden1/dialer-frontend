@@ -155,9 +155,8 @@ export class WebRTCPhone {
       case 'incoming': {
         const call = this._buildCall({ direction: 'inbound', from: String(msg.from), fromName: msg.fromName || null, to: String(this.opts.userId), callId: msg.callId });
         this.activeCall = call;
-
-        // Prepare to accept
-        call._incomingOffer = msg.offer;
+        call._incomingOffer  = msg.offer;
+        call._preAcceptQueue = []; // ICE candidates that arrive before user clicks Accept
 
         call.accept = async () => {
           const stream = await this._getAudio();
@@ -165,12 +164,20 @@ export class WebRTCPhone {
           const pc = this._makePeerConn(call, stream);
           call._pc = pc;
           call._localStream = stream;
+          call._iceQueue = [];
 
           await pc.setRemoteDescription(new RTCSessionDescription(call._incomingOffer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
+
+          // Apply ICE candidates that arrived while user was deciding to accept
+          for (const c of call._preAcceptQueue) {
+            try { await pc.addIceCandidate(c); } catch {}
+          }
+          call._preAcceptQueue = [];
+
           this._send({ type: 'answer', callId: call.callId, answer });
-          // 'accept' is emitted by onconnectionstatechange when truly connected
+          // 'accept' fires from onconnectionstatechange === 'connected'
         };
 
         this.opts.onIncoming?.(call);
@@ -181,18 +188,23 @@ export class WebRTCPhone {
         const call = this.activeCall;
         if (!call?._pc) break;
         await call._pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-        // Flush queued ICE
-        (call._iceQueue || []).forEach(c => call._pc.addIceCandidate(c));
+        // Flush ICE candidates queued before answer arrived
+        for (const c of (call._iceQueue || [])) {
+          try { await call._pc.addIceCandidate(c); } catch {}
+        }
         call._iceQueue = [];
         break;
       }
 
       case 'ice-candidate': {
         const call = this.activeCall;
-        if (!call?._pc) break;
+        if (!call) break;
         const cand = new RTCIceCandidate(msg.candidate);
-        if (call._pc.remoteDescription) {
-          await call._pc.addIceCandidate(cand);
+        if (!call._pc) {
+          // PC not created yet (callee hasn't accepted) — queue for later
+          (call._preAcceptQueue = call._preAcceptQueue || []).push(cand);
+        } else if (call._pc.remoteDescription) {
+          try { await call._pc.addIceCandidate(cand); } catch {}
         } else {
           (call._iceQueue = call._iceQueue || []).push(cand);
         }
