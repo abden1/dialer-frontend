@@ -14,6 +14,10 @@ const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  // TURN servers — needed when either peer is behind a strict NAT/firewall
+  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turns:openrelay.metered.ca:443',username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
 // ─── Shared audio element ─────────────────────────────────────────────────────
@@ -160,14 +164,13 @@ export class WebRTCPhone {
           if (!stream) { call.reject(); return; }
           const pc = this._makePeerConn(call, stream);
           call._pc = pc;
-
-          call.recorder.start(stream);
+          call._localStream = stream;
 
           await pc.setRemoteDescription(new RTCSessionDescription(call._incomingOffer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           this._send({ type: 'answer', callId: call.callId, answer });
-          call._emit('accept');
+          // 'accept' is emitted by onconnectionstatechange when truly connected
         };
 
         this.opts.onIncoming?.(call);
@@ -244,13 +247,26 @@ export class WebRTCPhone {
     };
 
     pc.ontrack = ({ streams }) => {
-      getAudioEl().srcObject = streams[0];
-      call.recorder.start(streams[0]);
+      const remoteStream = streams[0];
+      // Play remote audio
+      getAudioEl().srcObject = remoteStream;
+      // Record both sides: mix local + remote into one recorder
+      try {
+        const ctx  = new AudioContext();
+        const dest = ctx.createMediaStreamDestination();
+        ctx.createMediaStreamSource(localStream).connect(dest);
+        ctx.createMediaStreamSource(remoteStream).connect(dest);
+        call.recorder.start(dest.stream);
+        call._audioCtx = ctx;
+      } catch {
+        call.recorder.start(remoteStream);
+      }
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') call._emit('accept');
       if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+        call._audioCtx?.close?.();
         call._emit('disconnect');
         this._cleanup();
       }
@@ -314,6 +330,7 @@ export class WebRTCPhone {
 
   _cleanup() {
     if (this.activeCall) {
+      this.activeCall._audioCtx?.close?.();
       this.activeCall._localStream?.getTracks().forEach(t => t.stop());
       this.activeCall._pc?.close();
       this.activeCall = null;
