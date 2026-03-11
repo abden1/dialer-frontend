@@ -220,16 +220,21 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
   function handleIncoming(call) {
     setCurrentCall(call);
     setCallState('ringing');
-    const fromId = String(call.from || '');
-    setPhoneNumber(fromId);
+    const fromId  = String(call.from || '');
     const isGuest = fromId.startsWith('guest-');
+    // If from is a numeric agent ID, mark as internal
+    const isAgentCall = !isGuest && /^\d+$/.test(fromId);
+    isInternalRef.current = isAgentCall;
+    setPhoneNumber(fromId);
     setContactInfo(isGuest
       ? { name: call.fromName || 'Website Visitor', company: 'Calling from your website', phone: '' }
-      : null
+      : isAgentCall
+        ? { name: call.fromName || `Agent #${fromId}`, company: 'Internal Call', phone: '' }
+        : null
     );
     call.on('accept',     () => { setCallState('active'); startTimer(); });
     call.on('disconnect', () => endCallCleanup(call));
-    call.on('reject',     () => { setCallState('idle'); setCurrentCall(null); });
+    call.on('reject',     () => { setCallState('idle'); setCurrentCall(null); isInternalRef.current = false; });
   }
 
   // ── Call control ─────────────────────────────────────────────────────────
@@ -502,6 +507,38 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
 
       {/* Profile overlay */}
       {showProfile && <ProfilePage user={user} onClose={() => setShowProfile(false)} onPhotoChange={url => setSidebarPhoto(url)} />}
+
+      {/* ── Incoming call overlay (always on top) ── */}
+      {callState === 'ringing' && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 w-80 flex flex-col items-center gap-5 animate-bounce-once">
+            <div className="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center ring-4 ring-blue-300 animate-pulse">
+              <Phone className="w-12 h-12 text-blue-600" />
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-gray-900">{contactInfo?.name || phoneNumber || 'Unknown'}</p>
+              <p className="text-sm text-gray-500 mt-1">{contactInfo?.company || 'Incoming Call'}</p>
+              <p className="text-xs text-blue-500 font-medium mt-2 animate-pulse">📲 Incoming Call…</p>
+            </div>
+            <div className="flex gap-8">
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={rejectCall}
+                  className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 shadow-lg flex items-center justify-center transition-all">
+                  <PhoneOff className="w-7 h-7 text-white" />
+                </button>
+                <span className="text-xs text-gray-500">Decline</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={answerCall}
+                  className="w-16 h-16 rounded-full bg-green-500 hover:bg-green-600 shadow-lg flex items-center justify-center transition-all">
+                  <Phone className="w-7 h-7 text-white" />
+                </button>
+                <span className="text-xs text-gray-500">Accept</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Survey modal */}
       {showSurvey && surveyData && (
