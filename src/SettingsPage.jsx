@@ -33,7 +33,9 @@ export default function SettingsPage({ onClose, user }) {
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState('');
 
-  const builtinUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:5000/sip-ws`;
+  const builtinUrl = API_BASE
+    ? API_BASE.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/sip-ws'
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:5000/sip-ws`;
 
   useEffect(() => {
     const token = localStorage.getItem('token');
