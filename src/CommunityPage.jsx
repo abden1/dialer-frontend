@@ -383,9 +383,9 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                         <p className="text-xs font-semibold text-gray-900 truncate">{m.name}</p>
                         <RoleBadge role={m.role} />
                       </div>
-                      {m.id !== user.id && onlineSet.has(m.id) && (
+                      {m.id !== user.id && (
                         <button onClick={e => { e.stopPropagation(); makeCall(String(m.id), m); }}
-                          className="p-1 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg shrink-0">
+                          className={`p-1 rounded-lg shrink-0 ${onlineSet.has(m.id) ? 'bg-green-50 hover:bg-green-100 text-green-700' : 'bg-gray-50 hover:bg-gray-100 text-gray-400'}`}>
                           <Phone className="w-3 h-3" />
                         </button>
                       )}

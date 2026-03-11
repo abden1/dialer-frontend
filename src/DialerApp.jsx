@@ -156,7 +156,15 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
           onStatusChange: s   => { if (s === 'disconnected') setDevStatus('reconnecting'); },
           onIncoming:     call => handleIncoming(call),
           onChat:         msg => setChatMessages(prev => [...prev, msg]),
-          onSignal:       msg => setCommunitySignals(prev => [...prev, msg]),
+          onSignal:       msg => {
+            // Update online agents list in real-time on connect/disconnect
+            if (msg.type === 'user-online') {
+              loadAgents(); // refresh full list with latest data
+            } else if (msg.type === 'user-offline') {
+              setOnlineAgents(prev => prev.filter(a => a.id !== msg.userId));
+            }
+            setCommunitySignals(prev => [...prev, msg]);
+          },
         });
         setPhone(p);
       } catch (err) {
