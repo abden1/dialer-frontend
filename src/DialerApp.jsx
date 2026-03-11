@@ -132,6 +132,12 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
         const { settings } = await api('/settings/credentials');
         const token        = localStorage.getItem('token');
         const mode         = settings?.mode || 'webrtc';
+        // Always fix built-in SIP URL at runtime — the stored URL may be from a different environment (e.g. localhost)
+        if (settings?.builtinSip) {
+          settings.sipServer = API_BASE
+            ? API_BASE.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/sip-ws'
+            : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:5000/sip-ws`;
+        }
         setPhoneSettings(settings);
         p = await createPhone({
           mode, user, token, settings,
