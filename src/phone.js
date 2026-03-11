@@ -103,20 +103,29 @@ export class WebRTCPhone {
   connect() {
     const url = `${this.opts.wsUrl}?token=${encodeURIComponent(this.opts.token)}`;
     this.ws   = new WebSocket(url);
+    this._connError = false;
 
     this.ws.onopen = () => {
       this.status = 'ready';
+      this._connError = false;
       this.opts.onReady?.();
+      // Send a ping every 25s to keep Railway from closing idle connections
+      this._pingInterval = setInterval(() => {
+        if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type: 'ping' }));
+      }, 25000);
     };
 
     this.ws.onerror = () => {
+      this._connError = true;
       this.status = 'error';
       this.opts.onError?.('Cannot connect to signaling server');
     };
 
     this.ws.onclose = () => {
+      clearInterval(this._pingInterval);
       this.status = 'disconnected';
-      this.opts.onStatusChange?.('disconnected');
+      // Only trigger "reconnecting" if it was a clean disconnect, not a connection error
+      if (!this._connError) this.opts.onStatusChange?.('disconnected');
       // Auto-reconnect after 3 s
       setTimeout(() => this.connect(), 3000);
     };
@@ -130,6 +139,9 @@ export class WebRTCPhone {
 
   async _handle(msg) {
     switch (msg.type) {
+
+      case 'pong':
+        break; // keepalive response — ignore
 
       case 'registered':
         this.status = 'ready';
