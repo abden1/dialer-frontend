@@ -30,15 +30,16 @@ function RoleBadge({ role }) {
 }
 
 function Avatar({ name, size = 'md', online, photoUrl }) {
+  const [imgErr, setImgErr] = React.useState(false);
   const sz = size === 'sm' ? 'w-7 h-7 text-xs' : size === 'lg' ? 'w-11 h-11 text-sm' : 'w-9 h-9 text-sm';
   return (
     <div className="relative shrink-0">
-      {photoUrl
-        ? <img src={photoUrl} alt={name} className={`${sz} rounded-full object-cover`} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
-        : null}
-      <div className={`${sz} rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center font-bold text-white ${photoUrl ? 'hidden' : ''}`}>
-        {name?.[0]?.toUpperCase() || '?'}
-      </div>
+      {photoUrl && !imgErr
+        ? <img src={photoUrl} alt={name} className={`${sz} rounded-full object-cover`} onError={() => setImgErr(true)} />
+        : <div className={`${sz} rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center font-bold text-white`}>
+            {name?.[0]?.toUpperCase() || '?'}
+          </div>
+      }
       {online !== undefined && (
         <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${online ? 'bg-green-500' : 'bg-gray-300'}`} />
       )}
