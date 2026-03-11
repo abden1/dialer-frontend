@@ -901,6 +901,7 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
               chatMessages={chatMessages}
               signals={communitySignals}
               makeCall={makeCall}
+              currentUserPhoto={sidebarPhoto || user.photoUrl || null}
             />
           )}
 

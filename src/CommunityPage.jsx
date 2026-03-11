@@ -29,11 +29,14 @@ function RoleBadge({ role }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${c.bg}`}>{c.label}</span>;
 }
 
-function Avatar({ name, size = 'md', online }) {
+function Avatar({ name, size = 'md', online, photoUrl }) {
   const sz = size === 'sm' ? 'w-7 h-7 text-xs' : size === 'lg' ? 'w-11 h-11 text-sm' : 'w-9 h-9 text-sm';
   return (
     <div className="relative shrink-0">
-      <div className={`${sz} rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center font-bold text-white`}>
+      {photoUrl
+        ? <img src={photoUrl} alt={name} className={`${sz} rounded-full object-cover`} onError={e => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
+        : null}
+      <div className={`${sz} rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center font-bold text-white ${photoUrl ? 'hidden' : ''}`}>
         {name?.[0]?.toUpperCase() || '?'}
       </div>
       {online !== undefined && (
@@ -54,7 +57,7 @@ function timeAgo(dateStr) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function CommunityPage({ user, onlineAgents, phone, chatMessages, signals, makeCall }) {
+export default function CommunityPage({ user, onlineAgents, phone, chatMessages, signals, makeCall, currentUserPhoto }) {
   const [leftTab,  setLeftTab]  = useState('people'); // 'people' | 'team'
   const [rightTab, setRightTab] = useState('feed');   // 'feed' | 'teamchat' | 'dm'
 
@@ -82,10 +85,24 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
   const [postImagePreview, setPostImagePreview] = useState(null);
   const [posting,       setPosting]       = useState(false);
   const [expanded,      setExpanded]      = useState(new Set());
-  const [commentInputs, setCommentInputs] = useState({});
-  const postImageRef = useRef(null);
+  const [commentInputs,       setCommentInputs]       = useState({});
+  const [commentImageFiles,   setCommentImageFiles]   = useState({}); // postId → File
+  const [commentImagePreviews,setCommentImagePreviews]= useState({}); // postId → dataURL
+  const postImageRef     = useRef(null);
+  const commentImageRefs = useRef({});
 
   const onlineSet = new Set(onlineAgents.map(a => a.id));
+
+  // Map userId → photoUrl, built from allUsers list
+  const userPhotoMap = React.useMemo(() => {
+    const m = {};
+    allUsers.forEach(u => { if (u.photoUrl) m[u.id] = u.photoUrl; });
+    // Include logged-in user's own current photo
+    if (currentUserPhoto) m[user.id] = currentUserPhoto;
+    return m;
+  }, [allUsers, currentUserPhoto, user.id]);
+
+  function photoFor(userId) { return userPhotoMap[userId] || null; }
 
   // ── Load data ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -243,10 +260,37 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
     const text = (commentInputs[postId] || '').trim();
     if (!text) return;
     try {
-      await api(`/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify({ text }) });
+      const imgFile = commentImageFiles[postId];
+      let body;
+      if (imgFile) {
+        const fd = new FormData();
+        fd.append('text', text);
+        fd.append('image', imgFile);
+        body = fd;
+      } else {
+        body = JSON.stringify({ text });
+      }
+      await api(`/posts/${postId}/comments`, { method: 'POST', body });
       setCommentInputs(p => ({ ...p, [postId]: '' }));
+      setCommentImageFiles(p => { const n = { ...p }; delete n[postId]; return n; });
+      setCommentImagePreviews(p => { const n = { ...p }; delete n[postId]; return n; });
       if (!phone?.sendChat) loadPosts();
     } catch (e) { alert(e.message); }
+  }
+
+  function handleCommentImageSelect(postId, e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCommentImageFiles(p => ({ ...p, [postId]: file }));
+    const reader = new FileReader();
+    reader.onload = ev => setCommentImagePreviews(p => ({ ...p, [postId]: ev.target.result }));
+    reader.readAsDataURL(file);
+  }
+
+  function clearCommentImage(postId) {
+    setCommentImageFiles(p => { const n = { ...p }; delete n[postId]; return n; });
+    setCommentImagePreviews(p => { const n = { ...p }; delete n[postId]; return n; });
+    if (commentImageRefs.current[postId]) commentImageRefs.current[postId].value = '';
   }
 
   async function deleteComment(postId, commentId) {
@@ -327,7 +371,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                   onClick={() => { if (u.id !== user.id) openDm(u); }}
                   className={`flex items-center gap-2 p-2 rounded-xl transition-colors cursor-pointer
                     ${dmTarget?.id === u.id && rightTab === 'dm' ? 'bg-blue-50 ring-1 ring-blue-200' : 'hover:bg-gray-50'}`}>
-                  <Avatar name={u.name} size="sm" online={onlineSet.has(u.id)} />
+                  <Avatar name={u.name} size="sm" online={onlineSet.has(u.id)} photoUrl={u.photoUrl || null} />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-gray-900 truncate">{u.name}</p>
                     <div className="flex items-center gap-1 flex-wrap mt-0.5">
@@ -378,7 +422,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                     <div key={m.id}
                       onClick={() => { if (m.id !== user.id) openDm(m); }}
                       className="flex items-center gap-2 p-2 rounded-xl bg-white border hover:bg-gray-50 cursor-pointer transition-colors">
-                      <Avatar name={m.name} size="sm" online={onlineSet.has(m.id)} />
+                      <Avatar name={m.name} size="sm" online={onlineSet.has(m.id)} photoUrl={m.photoUrl || null} />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-gray-900 truncate">{m.name}</p>
                         <RoleBadge role={m.role} />
@@ -422,7 +466,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
           <div className="flex-1 flex flex-col overflow-hidden">
             <div className="p-4 border-b shrink-0">
               <div className="flex gap-3">
-                <Avatar name={user.name} size="sm" />
+                <Avatar name={user.name} size="sm" photoUrl={currentUserPhoto} />
                 <div className="flex-1">
                   <textarea
                     value={postInput} onChange={e => setPostInput(e.target.value)}
@@ -466,7 +510,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                 <div key={post.id} className="border rounded-2xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
                   <div className="px-4 pt-4 pb-2">
                     <div className="flex items-start gap-3">
-                      <Avatar name={post.userName} size="md" />
+                      <Avatar name={post.userName} size="md" photoUrl={photoFor(post.userId)} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-semibold text-sm text-gray-900">{post.userName}</span>
@@ -504,7 +548,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                     <div className="px-4 pb-3 space-y-2 bg-gray-50">
                       {(post.comments || []).map(c => (
                         <div key={c.id} className="flex items-start gap-2 pt-2">
-                          <Avatar name={c.userName} size="sm" />
+                          <Avatar name={c.userName} size="sm" photoUrl={photoFor(c.userId)} />
                           <div className="flex-1 bg-white rounded-xl px-3 py-2 text-sm border">
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <span className="font-semibold text-xs text-gray-800">{c.userName}</span>
@@ -512,6 +556,9 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                               <span className="text-[10px] text-gray-400 ml-auto">{timeAgo(c.createdAt)}</span>
                             </div>
                             <p className="text-xs text-gray-700">{c.text}</p>
+                            {c.imageUrl && (
+                              <img src={c.imageUrl} alt="comment" className="rounded-lg mt-1.5 max-h-40 max-w-full object-cover border" />
+                            )}
                           </div>
                           {(c.userId === user.id || user.role === 'admin') && (
                             <button onClick={() => deleteComment(post.id, c.id)} className="mt-1 p-0.5 text-gray-300 hover:text-red-400">
@@ -520,19 +567,36 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                           )}
                         </div>
                       ))}
-                      <div className="flex items-center gap-2 pt-1.5">
-                        <Avatar name={user.name} size="sm" />
-                        <input
-                          value={commentInputs[post.id] || ''}
-                          onChange={e => setCommentInputs(p => ({ ...p, [post.id]: e.target.value }))}
-                          onKeyDown={e => { if (e.key === 'Enter') addComment(post.id); }}
-                          placeholder="Write a comment… (Enter)"
-                          className="flex-1 border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
-                        />
-                        <button onClick={() => addComment(post.id)} disabled={!commentInputs[post.id]?.trim()}
-                          className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 text-white rounded-lg">
-                          <Send className="w-3 h-3" />
-                        </button>
+                      <div className="flex items-start gap-2 pt-1.5">
+                        <Avatar name={user.name} size="sm" photoUrl={currentUserPhoto} />
+                        <div className="flex-1">
+                          {commentImagePreviews[post.id] && (
+                            <div className="relative mb-1">
+                              <img src={commentImagePreviews[post.id]} alt="preview" className="rounded-lg max-h-24 max-w-full object-cover border" />
+                              <button onClick={() => clearCommentImage(post.id)}
+                                className="absolute top-0.5 right-0.5 bg-black/50 text-white rounded-full p-0.5 hover:bg-black/70">
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              value={commentInputs[post.id] || ''}
+                              onChange={e => setCommentInputs(p => ({ ...p, [post.id]: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter') addComment(post.id); }}
+                              placeholder="Write a comment… (Enter)"
+                              className="flex-1 border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            />
+                            <button onClick={() => { if (!commentImageRefs.current[post.id]) { const inp = document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange = e => handleCommentImageSelect(post.id, e); commentImageRefs.current[post.id] = inp; } commentImageRefs.current[post.id].click(); }}
+                              className="p-1.5 text-gray-400 hover:text-blue-500 border rounded-lg hover:border-blue-400 transition-colors">
+                              <ImagePlus className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => addComment(post.id)} disabled={!commentInputs[post.id]?.trim()}
+                              className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 text-white rounded-lg">
+                              <Send className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -618,7 +682,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                   <button onClick={() => setDmTarget(null)} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100">
                     <ArrowLeft className="w-4 h-4" />
                   </button>
-                  <Avatar name={dmTarget.name} size="sm" online={onlineSet.has(dmTarget.id)} />
+                  <Avatar name={dmTarget.name} size="sm" online={onlineSet.has(dmTarget.id)} photoUrl={photoFor(dmTarget.id)} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">{dmTarget.name}</p>
                     <div className="flex items-center gap-1.5">
@@ -649,7 +713,7 @@ export default function CommunityPage({ user, onlineAgents, phone, chatMessages,
                     const isMe = m.fromId === user.id;
                     return (
                       <div key={m.id} className={`flex gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
-                        <Avatar name={isMe ? user.name : dmTarget.name} size="sm" />
+                        <Avatar name={isMe ? user.name : dmTarget.name} size="sm" photoUrl={isMe ? currentUserPhoto : photoFor(dmTarget.id)} />
                         <div className={`max-w-[70%] flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
                           <div className={`px-3 py-2 rounded-2xl text-sm leading-snug ${isMe ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-slate-100 text-gray-800 rounded-tl-sm'}`}>
                             {m.text}
