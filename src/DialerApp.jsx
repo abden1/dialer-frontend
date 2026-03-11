@@ -101,8 +101,9 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
   const [chatMessages, setChatMessages]       = useState([]);
   const [communitySignals, setCommunitySignals] = useState([]);
 
-  const timerRef     = useRef(null);
-  const autoTimerRef = useRef(null);
+  const timerRef        = useRef(null);
+  const autoTimerRef    = useRef(null);
+  const isInternalRef   = useRef(false); // true when calling another agent
 
   // Refs for auto-dial closures
   const autoRef       = useRef(autoActive);
@@ -235,6 +236,8 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
   async function makeCall(number, info = null) {
     const p = phoneRef.current;
     if (!p || devStatus !== 'ready') { alert('Phone not ready. Check Settings.'); return false; }
+    // Mark as internal if calling another agent (info has a role property)
+    isInternalRef.current = !!(info?.role);
     try {
       const call = await p.call(number);
       if (!call) return false;
@@ -254,12 +257,14 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
 
   async function endCallCleanup(call, infoArg) {
     stopTimer();
-    const dur     = callDurRef.current;
-    const info    = infoArg || contactRef.current;
-    const wasAuto = autoRef.current;
-    const idx     = qIdxRef.current;
-    const contact = qRef.current[idx];
-    const listId  = dialListIdRef.current;
+    const dur        = callDurRef.current;
+    const info       = infoArg || contactRef.current;
+    const wasAuto    = autoRef.current;
+    const idx        = qIdxRef.current;
+    const contact    = qRef.current[idx];
+    const listId     = dialListIdRef.current;
+    const isInternal = isInternalRef.current;
+    isInternalRef.current = false;
 
     setCallState('idle');
     setCurrentCall(null);
@@ -267,6 +272,9 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
     setCallDuration(0);
     setIsMuted(false);
     setLeadPanelTab('info');
+
+    // Skip recording, logging, and survey for internal agent-to-agent calls
+    if (isInternal) return;
 
     // Upload recording
     let recFile = null;
