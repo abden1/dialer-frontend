@@ -475,30 +475,58 @@ export async function createPhone({ mode, user, token, settings, onReady, onErro
     ? apiBase.replace(/^https/, 'wss').replace(/^http/, 'ws') + '/ws'
     : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 
+  // ── WebRTC-only mode ──────────────────────────────────────────────────────
   if (mode === 'webrtc') {
     const phone = new WebRTCPhone({ userId: user.id, token, wsUrl, onReady, onError, onIncoming, onStatusChange, onChat, onSignal });
     phone.connect();
     return phone;
   }
 
-  // SIP mode
+  // ── SIP mode ──────────────────────────────────────────────────────────────
+  // ALWAYS create a WebRTC presence phone so agents appear online and can
+  // receive/make agent-to-agent calls via the WebRTC signaling channel.
+  const presencePhone = new WebRTCPhone({
+    userId: user.id, token, wsUrl,
+    onReady,                           // drives "Ready" status in the UI
+    onError: msg => {
+      if (msg === 'Cannot connect to signaling server') onError?.(msg);
+    },
+    onIncoming,                        // incoming agent calls come through here
+    onStatusChange,
+    onChat,
+    onSignal,
+  });
+  presencePhone.connect();
+
   if (!settings?.sipServer) {
-    onError?.('SIP not configured. Go to Settings → choose a provider.');
-    return null;
+    // No SIP configured — presence-only mode (agent calls still work)
+    return presencePhone;
   }
 
   let sipServer = settings.sipServer;
-
-  // Built-in SIP server: append JWT token for authentication
-  // (the server authenticates via token in URL, no SIP digest auth needed)
   if (settings.builtinSip) {
     sipServer = `${sipServer}${sipServer.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
   } else if (!settings.sipUsername || !settings.sipPassword) {
-    onError?.('SIP Username and Password required. Go to Settings.');
-    return null;
+    return presencePhone;
   }
 
-  const phone = new SIPPhone({ ...settings, sipServer, onReady, onError, onIncoming, onStatusChange });
-  await phone.connect();
-  return phone;
+  const sipPhone = new SIPPhone({ ...settings, sipServer,
+    onReady: () => {},          // presence phone already owns onReady
+    onError: () => {},
+    onIncoming: call => onIncoming?.(call),   // external incoming calls
+    onStatusChange: () => {},
+  });
+  await sipPhone.connect();
+
+  // Return a combined phone: agent calls (short numeric ID) → WebRTC,
+  //                           external calls (phone numbers)  → SIP
+  return {
+    call: (number) => /^\d{1,8}$/.test(String(number))
+      ? presencePhone.call(number)
+      : sipPhone.call(number),
+    sendChat:    (text, scope) => presencePhone.sendChat(text, scope),
+    sendDm:      (toId, text)  => presencePhone.sendDm(toId, text),
+    sendSignal:  (msg)         => presencePhone._send(msg),
+    destroy:     ()            => { presencePhone.destroy(); sipPhone.destroy(); },
+  };
 }
