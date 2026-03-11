@@ -136,7 +136,17 @@ export default function DialerApp({ user, onLogout, onOpenAdmin, onOpenSettings 
         p = await createPhone({
           mode, user, token, settings,
           onReady:        () => setDevStatus('ready'),
-          onError:        msg => { console.warn('Phone error:', msg); setDevStatus('error'); },
+          onError:        msg => {
+            console.warn('Phone error:', msg);
+            // Only mark device as disconnected for real connection errors
+            if (msg === 'Cannot connect to signaling server' || msg === 'Microphone access denied') {
+              setDevStatus('error');
+            } else {
+              // Call-level error (e.g. agent offline) — just show an alert, don't break the device
+              setCallState('idle'); setCurrentCall(null);
+              alert(msg);
+            }
+          },
           onStatusChange: s   => { if (s === 'disconnected') setDevStatus('reconnecting'); },
           onIncoming:     call => handleIncoming(call),
           onChat:         msg => setChatMessages(prev => [...prev, msg]),
